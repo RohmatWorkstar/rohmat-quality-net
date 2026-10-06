@@ -60,8 +60,10 @@ module FitGap
           skill_id:        vacancy_skill.skill_id,
           candidate_level: candidate_level,
           expected_level:  expected_level,
+          required_level:  expected_level,
           result:          result,
           delta:           delta,
+          is_override:     portfolio_skill ? portfolio_skill[:overridden] : false,
           confidence:      portfolio_skill&.dig(:confidence)
         }
       end

@@ -2,6 +2,11 @@ import api from "./api";
 import type { Portfolio, AssessorOverride, FitGapReport } from "@/types";
 
 export const portfoliosApi = {
+  saveOverride: (portfolioSkillId: number, data: { override_level: number; assessor_notes: string }) =>
+    api.post<{ override: AssessorOverride }>(`/portfolio_skills/${portfolioSkillId}/override`, {
+      override: data,
+    }),
+
   getOverride: (portfolioSkillId: number, data: { override_level: number; assessor_notes: string }) =>
     api.post<{ override: AssessorOverride }>(`/portfolio_skills/${portfolioSkillId}/override`, {
       override: data,

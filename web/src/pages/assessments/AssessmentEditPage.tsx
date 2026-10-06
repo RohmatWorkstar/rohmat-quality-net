@@ -37,8 +37,10 @@ export default function AssessmentEditPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [deletedSkillIds, setDeletedSkillIds] = useState<number[]>([]);
+
   const form = useForm<AssessmentFormValues>({
-    defaultValues: { name: "", time_limit_min: 45, skills: [] },
+    defaultValues: { name: "", time_limit_min: 45, language: "en", skills: [] },
   });
 
   const { register, handleSubmit, control, setValue, reset, formState: { errors } } = form;
@@ -49,7 +51,12 @@ export default function AssessmentEditPage() {
       .get(Number(id))
       .then((res) => {
         const a = res.data.assessment;
-        reset({ name: a.name, time_limit_min: a.time_limit_min, skills: a.skills });
+        reset({
+          name: a.name,
+          time_limit_min: a.time_limit_min,
+          language: a.language || "en",
+          skills: a.skills || [],
+        });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -69,15 +76,29 @@ export default function AssessmentEditPage() {
     }
   };
 
+  const handleRemoveSkill = (index: number) => {
+    const skillData = form.getValues(`skills.${index}` as any);
+    if (skillData?.id) {
+      setDeletedSkillIds((prev) => [...prev, skillData.id]);
+    }
+    remove(index);
+  };
+
   const onSubmit = async (data: AssessmentFormValues) => {
     if (data.skills.length === 0) { setError("Add at least one skill."); return; }
     setError(null);
     setSubmitting(true);
     try {
+      const skillAttributes = [
+        ...data.skills.map((s, i) => ({ ...s, display_order: i })),
+        ...deletedSkillIds.map((delId) => ({ id: delId, _destroy: true })),
+      ];
+
       await assessmentsApi.update(Number(id), {
         name: data.name,
         time_limit_min: data.time_limit_min,
-        assessment_skills_attributes: data.skills.map((s, i) => ({ ...s, display_order: i })),
+        language: data.language,
+        assessment_skills_attributes: skillAttributes,
       });
       navigate(`/assessments/${id}/invite`);
     } catch (e: any) {
@@ -130,6 +151,20 @@ export default function AssessmentEditPage() {
           </Select>
         </div>
 
+        <div className="space-y-1.5">
+          <Label>Interview language</Label>
+          <Select
+            value={form.watch("language") || "en"}
+            onValueChange={(v) => setValue("language", v as "en" | "id")}
+          >
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="en">English</SelectItem>
+              <SelectItem value="id">Indonesian</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <Separator />
 
         <div className="space-y-3">
@@ -143,7 +178,7 @@ export default function AssessmentEditPage() {
               <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-2">
                   {fields.map((field, index) => (
-                    <SkillCard key={field.id} id={field.id} index={index} form={form} onRemove={() => remove(index)} />
+                    <SkillCard key={field.id} id={field.id} index={index} form={form} onRemove={() => handleRemoveSkill(index)} />
                   ))}
                 </div>
               </SortableContext>

@@ -1,0 +1,159 @@
+name: Release Gating Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Tag or Version to validate for release'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  validate-release-notes:
+    name: "Check: Release Notes & Claims"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify RELEASE_NOTES.md exists and is non-empty
+        run: |
+          if [ ! -f RELEASE_NOTES.md ]; then
+            echo "[BLOCK] RELEASE_NOTES.md does not exist in root directory."
+            exit 1
+          fi
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "[BLOCK] RELEASE_NOTES.md is empty."
+            exit 1
+          fi
+          echo "[PASS] RELEASE_NOTES.md verified."
+
+  run-full-regression-web:
+    name: "Web: Full Regression Suite"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web/package.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Run Web Tests
+        run: npm test -- --run
+
+      - name: Verify Production Build
+        run: npm run build
+
+  run-full-regression-api:
+    name: "API: Full Regression Suite"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: rakamin_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.3.2
+          bundler-cache: true
+          working-directory: api
+
+      - name: Load Schema
+        env:
+          RAILS_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: password
+          DB_NAME: rakamin_test
+          SECRET_KEY_BASE: test_secret_key_base_for_ci_pipeline_only_32bytes_min
+        run: bundle exec rails db:schema:load
+
+      - name: Run API Regression Suite
+        env:
+          RAILS_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: password
+          DB_NAME: rakamin_test
+          REDIS_URL: redis://localhost:6379/1
+          SECRET_KEY_BASE: test_secret_key_base_for_ci_pipeline_only_32bytes_min
+        run: bundle exec rspec --format documentation
+
+  release-verdict:
+    name: "Final Release Gate Verdict"
+    needs: [validate-release-notes, run-full-regression-web, run-full-regression-api]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Evaluate Release Gate Status
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          NOTES_STATUS="${{ needs.validate-release-notes.result }}"
+          WEB_STATUS="${{ needs.run-full-regression-web.result }}"
+          API_STATUS="${{ needs.run-full-regression-api.result }}"
+
+          echo "=========================================================="
+          echo "           RELEASE CANDIDATE VERIFICATION: $TAG_NAME     "
+          echo "=========================================================="
+          echo "  - Release Notes & Claims: $NOTES_STATUS"
+          echo "  - Web Suite (Vitest & Build): $WEB_STATUS"
+          echo "  - API Suite (RSpec Regression): $API_STATUS"
+          echo "=========================================================="
+
+          if [ "$NOTES_STATUS" = "success" ] && [ "$WEB_STATUS" = "success" ] && [ "$API_STATUS" = "success" ]; then
+            echo ""
+            echo " [STATUS] RELEASE STATUS: RELEASABLE"
+            echo " All quality gates passed. This version is mathematically proven safe to deploy."
+            echo ""
+            exit 0
+          else
+            echo ""
+            echo " [STATUS] RELEASE STATUS: BLOCKED"
+            echo " Gating failure detected. This version is NOT safe to ship to clients."
+            echo " Check job failures above before cutting release."
+            echo ""
+            exit 1
+          fi

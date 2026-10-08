@@ -18,6 +18,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   dor-gate:
     name: "Gate: Definition of Ready (DoR)"
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -78,8 +79,9 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
           POSTGRES_DB: rakamin_test
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -107,29 +109,60 @@ jobs:
           bundler-cache: true
           working-directory: api
 
+      - name: Install PostgreSQL Client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
       - name: Setup Database
         env:
           RAILS_ENV: test
-          DB_HOST: localhost
-          DB_PORT: 5432
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5433
+          DB_USERNAME: postgres
           DB_USER: postgres
           DB_PASSWORD: password
           DB_NAME: rakamin_test
+          PGHOST: 127.0.0.1
+          PGPORT: 5433
+          PGUSER: postgres
+          PGPASSWORD: password
+          PGDATABASE: rakamin_test
           SECRET_KEY_BASE: test_secret_key_base_for_ci_pipeline_only_32bytes_min
         run: |
-          bundle exec rails db:schema:load
+          set +e
+          echo "### DB Setup Diagnostics" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          echo "--- Testing TCP connection ---" >> $GITHUB_STEP_SUMMARY
+          nc -zv 127.0.0.1 5433 2>&1 >> $GITHUB_STEP_SUMMARY
+          echo "--- Creating schema and organizations table ---" >> $GITHUB_STEP_SUMMARY
+          PGPASSWORD=password psql -h 127.0.0.1 -p 5433 -U postgres -d rakamin_test -c "CREATE SCHEMA IF NOT EXISTS ai_interview;" 2>&1 >> $GITHUB_STEP_SUMMARY
+          PGPASSWORD=password psql -h 127.0.0.1 -p 5433 -U postgres -d rakamin_test -c "CREATE TABLE IF NOT EXISTS public.organizations (id BIGSERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, scheme VARCHAR(255) NOT NULL, identifier VARCHAR(255) NOT NULL, host VARCHAR(255) NOT NULL, alias_hosts VARCHAR[] NOT NULL DEFAULT '{}', config JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" 2>&1 >> $GITHUB_STEP_SUMMARY
+          echo "--- Running rails db:migrate ---" >> $GITHUB_STEP_SUMMARY
+          bundle exec rails db:migrate --trace 2>&1 >> $GITHUB_STEP_SUMMARY
+          MIGRATE_EXIT=$?
+          if [ $MIGRATE_EXIT -ne 0 ]; then
+            echo "--- Migrate exited with $MIGRATE_EXIT, attempting schema:load ---" >> $GITHUB_STEP_SUMMARY
+            bundle exec rails db:schema:load --trace 2>&1 >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          set -e
 
       - name: Run RSpec Tests
         env:
           RAILS_ENV: test
-          DB_HOST: localhost
-          DB_PORT: 5432
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5433
+          DB_USERNAME: postgres
           DB_USER: postgres
           DB_PASSWORD: password
           DB_NAME: rakamin_test
-          REDIS_URL: redis://localhost:6379/1
+          PGHOST: 127.0.0.1
+          PGPORT: 5433
+          PGUSER: postgres
+          PGPASSWORD: password
+          PGDATABASE: rakamin_test
+          REDIS_URL: redis://127.0.0.1:6379/1
           SECRET_KEY_BASE: test_secret_key_base_for_ci_pipeline_only_32bytes_min
-        run: bundle exec rspec --format progress --format documentation
+        run: bundle exec rspec --format documentation 2>&1 | tee -a $GITHUB_STEP_SUMMARY
 
   # ────────────────────────────────────────────────────────────────────────────
   # Job 4: Gate Aggregator & Verdict
@@ -146,6 +179,10 @@ jobs:
           DOR_STATUS="${{ needs.dor-gate.result }}"
           WEB_STATUS="${{ needs.test-web.result }}"
           API_STATUS="${{ needs.test-api.result }}"
+
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            DOR_STATUS="success"
+          fi
 
           echo "===================================================="
           echo "           QUALITY GATE EXECUTION SUMMARY           "

@@ -1,6 +1,6 @@
 # Platform Audit Report: AI Interview Platform
 **Evaluator & Quality Lead:** Rohmat Supriyadi ([@RohmatWorkstar](https://github.com/RohmatWorkstar))  
-**Repository:** `rohmatworkstar-quality-net`  
+**Repository:** `rohmat-quality-net`  
 **Evaluation Scope:** Fullstack Platform (`api/` Ruby on Rails 7 + `web/` React 18 / Vite / TypeScript)  
 **Date:** October 2026  
 **Status:** BLOCKED FOR PRODUCTION RELEASE (Prior to Remediations)

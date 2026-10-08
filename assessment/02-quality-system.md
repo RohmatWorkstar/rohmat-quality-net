@@ -1,6 +1,6 @@
 # Quality System & Engineering Net: Architecture, Operations & Red-to-Green Story
 **Author & Quality Lead:** Rohmat Supriyadi ([@RohmatWorkstar](https://github.com/RohmatWorkstar))  
-**Repository:** `rohmatworkstar-quality-net`  
+**Repository:** `rohmat-quality-net`  
 **Delivery Scope:** Workflow Hardening, Definition of Ready (DoR) Gate, Automated CI Pipeline, and Fullstack Defect Remediations  
 **Date:** October 2026
 
